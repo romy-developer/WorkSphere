@@ -14,10 +14,16 @@ const bootstrapCredentialsSchema = z.object({
 }).strict();
 
 export interface BootstrapTransaction {
-  ensureRolePermissionMatrix(): Promise<void>;
+  inspectSuperAdminConfiguration(): Promise<SuperAdminConfiguration>;
+  findUserByEmail(email: string): Promise<{ isSuperAdmin: boolean } | null>;
   hasSuperAdmin(): Promise<boolean>;
-  userExists(email: string): Promise<boolean>;
   createSuperAdmin(input: { email: string; name: string; passwordHash: string }): Promise<void>;
+}
+
+export interface SuperAdminConfiguration {
+  roleExists: boolean;
+  missingPermissions: string[];
+  missingRolePermissions: string[];
 }
 
 export interface BootstrapRepository {
@@ -38,11 +44,22 @@ export class BootstrapEmailInUseError extends Error {
   }
 }
 
+export class BootstrapConfigurationError extends Error {
+  constructor(readonly missingConfiguration: string[]) {
+    super(`Bootstrap is blocked by incomplete RBAC configuration: ${missingConfiguration.join(", ")}.`);
+    this.name = "BootstrapConfigurationError";
+  }
+}
+
+export type BootstrapResult =
+  | { status: "created" }
+  | { status: "already_exists" };
+
 export async function bootstrapSuperAdmin(
   credentials: { email: string; password: string },
   repository: BootstrapRepository,
   hasher: PasswordHasher,
-): Promise<{ created: boolean; email: string }> {
+): Promise<BootstrapResult> {
   const parsed = bootstrapCredentialsSchema.safeParse(credentials);
   if (!parsed.success) {
     throw new BootstrapInputError(
@@ -51,15 +68,29 @@ export async function bootstrapSuperAdmin(
   }
 
   return repository.transaction(async (transaction) => {
-    await transaction.ensureRolePermissionMatrix();
-
-    if (await transaction.hasSuperAdmin()) {
-      return { created: false, email: parsed.data.email };
+    const configuration = await transaction.inspectSuperAdminConfiguration();
+    const missingConfiguration: string[] = [];
+    if (!configuration.roleExists) missingConfiguration.push("SUPER_ADMIN role");
+    if (configuration.missingPermissions.length > 0) {
+      missingConfiguration.push(`permissions ${configuration.missingPermissions.join(", ")}`);
+    }
+    if (configuration.missingRolePermissions.length > 0) {
+      missingConfiguration.push(
+        `SUPER_ADMIN assignments ${configuration.missingRolePermissions.join(", ")}`,
+      );
+    }
+    if (missingConfiguration.length > 0) {
+      throw new BootstrapConfigurationError(missingConfiguration);
     }
 
-    if (await transaction.userExists(parsed.data.email)) {
+    const existingUser = await transaction.findUserByEmail(parsed.data.email);
+    if (existingUser?.isSuperAdmin) {
+      return { status: "already_exists" };
+    }
+    if (existingUser) {
       throw new BootstrapEmailInUseError();
     }
+    if (await transaction.hasSuperAdmin()) return { status: "already_exists" };
 
     const passwordHash = await hasher.hash(parsed.data.password);
     await transaction.createSuperAdmin({
@@ -68,6 +99,6 @@ export async function bootstrapSuperAdmin(
       passwordHash,
     });
 
-    return { created: true, email: parsed.data.email };
+    return { status: "created" };
   });
 }

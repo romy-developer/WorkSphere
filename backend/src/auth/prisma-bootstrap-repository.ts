@@ -1,63 +1,80 @@
 import { Prisma, PrismaClient } from "@prisma/client";
-import {
-  PERMISSION_DESCRIPTIONS,
-  ROLE_DESCRIPTIONS,
-  ROLE_NAMES,
-  ROLE_PERMISSION_MATRIX,
-} from "./permissions.js";
+import { ROLE_PERMISSION_MATRIX } from "./permissions.js";
 import type { BootstrapRepository, BootstrapTransaction } from "./bootstrap.js";
+
+const MAX_TRANSACTION_ATTEMPTS = 3;
 
 export class PrismaBootstrapRepository implements BootstrapRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
-  transaction<T>(operation: (transaction: BootstrapTransaction) => Promise<T>): Promise<T> {
-    return this.prisma.$transaction(
-      (transaction) => operation(new PrismaBootstrapTransaction(transaction)),
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
+  async transaction<T>(operation: (transaction: BootstrapTransaction) => Promise<T>): Promise<T> {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(
+          (transaction) => operation(new PrismaBootstrapTransaction(transaction)),
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        );
+      } catch (error) {
+        if (attempt >= MAX_TRANSACTION_ATTEMPTS || !isBootstrapRace(error)) throw error;
+      }
+    }
   }
+}
+
+function isBootstrapRace(error: unknown): boolean {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
+  if (error.code === "P2034") return true;
+  if (error.code !== "P2002") return false;
+
+  const target = error.meta?.target;
+  if (typeof target === "string") return target.toLowerCase().includes("email");
+  return Array.isArray(target) && target.some(
+    (field) => typeof field === "string" && field.toLowerCase().includes("email"),
+  );
 }
 
 class PrismaBootstrapTransaction implements BootstrapTransaction {
   constructor(private readonly transaction: Prisma.TransactionClient) {}
 
-  async ensureRolePermissionMatrix(): Promise<void> {
-    const roleIds = new Map<string, string>();
-    const permissionIds = new Map<string, string>();
+  async inspectSuperAdminConfiguration() {
+    const requiredPermissions = ROLE_PERMISSION_MATRIX.SUPER_ADMIN;
+    const role = await this.transaction.role.findUnique({
+      where: { name: "SUPER_ADMIN" },
+      select: {
+        rolePermissions: {
+          select: { permission: { select: { key: true } } },
+        },
+      },
+    });
+    const permissions = await this.transaction.permission.findMany({
+      where: { key: { in: [...requiredPermissions] } },
+      select: { key: true },
+    });
+    const availablePermissions = new Set(permissions.map(({ key }) => key));
+    const assignedPermissions = new Set(
+      role?.rolePermissions.map(({ permission }) => permission.key) ?? [],
+    );
 
-    for (const name of ROLE_NAMES) {
-      const role = await this.transaction.role.upsert({
-        where: { name },
-        create: { name, description: ROLE_DESCRIPTIONS[name] },
-        update: { description: ROLE_DESCRIPTIONS[name] },
-        select: { id: true },
-      });
-      roleIds.set(name, role.id);
-    }
+    return {
+      roleExists: role !== null,
+      missingPermissions: requiredPermissions.filter((key) => !availablePermissions.has(key)),
+      missingRolePermissions: role
+        ? requiredPermissions.filter((key) => !assignedPermissions.has(key))
+        : [],
+    };
+  }
 
-    for (const [key, description] of Object.entries(PERMISSION_DESCRIPTIONS)) {
-      const permission = await this.transaction.permission.upsert({
-        where: { key },
-        create: { key, description },
-        update: { description },
-        select: { id: true },
-      });
-      permissionIds.set(key, permission.id);
-    }
-
-    for (const name of ROLE_NAMES) {
-      const roleId = roleIds.get(name);
-      if (!roleId) throw new Error("Role seed data is inconsistent.");
-
-      await this.transaction.rolePermission.createMany({
-        data: ROLE_PERMISSION_MATRIX[name].map((permissionKey) => {
-          const permissionId = permissionIds.get(permissionKey);
-          if (!permissionId) throw new Error("Permission seed data is inconsistent.");
-          return { roleId, permissionId };
-        }),
-        skipDuplicates: true,
-      });
-    }
+  async findUserByEmail(email: string): Promise<{ isSuperAdmin: boolean } | null> {
+    const user = await this.transaction.user.findFirst({
+      where: { email: { equals: email, mode: "insensitive" } },
+      select: {
+        userRoles: {
+          select: { role: { select: { name: true } } },
+        },
+      },
+    });
+    if (!user) return null;
+    return { isSuperAdmin: user.userRoles.some(({ role }) => role.name === "SUPER_ADMIN") };
   }
 
   async hasSuperAdmin(): Promise<boolean> {

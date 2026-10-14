@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import argon2 from "argon2";
 import { resolve } from "node:path";
 import {
+  BootstrapConfigurationError,
   BootstrapEmailInUseError,
   BootstrapInputError,
   bootstrapSuperAdmin,
@@ -28,13 +29,17 @@ async function main(): Promise<void> {
       argon2,
     );
 
-    if (result.created) {
-      console.info(`Created the initial Super Admin account for ${result.email}.`);
+    if (result.status === "created") {
+      console.info("Created the initial Super Admin account.");
     } else {
-      console.info("A Super Admin already exists; bootstrap did not change any account or password.");
+      console.info("A Super Admin already exists; no account or password was changed.");
     }
   } catch (error) {
-    if (error instanceof BootstrapInputError || error instanceof BootstrapEmailInUseError) {
+    if (
+      error instanceof BootstrapInputError ||
+      error instanceof BootstrapEmailInUseError ||
+      error instanceof BootstrapConfigurationError
+    ) {
       console.error(error.message);
     } else {
       console.error("Bootstrap failed. Check database availability and retry.");
