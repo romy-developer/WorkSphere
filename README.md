@@ -91,4 +91,4 @@ Prisma validation and generation use `DATABASE_URL` from the root `.env`; they d
 
 - `frontend/` - React, TypeScript, Vite, and Tailwind CSS
 - `backend/` - Express API, TypeScript, Vitest, Supertest, and Prisma schema
-- `.github/copilot-instructions.md` - project architecture, security, coding, and testing guidance
+- `.github/copilot-instructions.md` - project architecture, security, coding, and testing guidance"# WorkSphere" 
