@@ -7,7 +7,7 @@ Scope: source, Prisma schema/migrations, tests, package scripts, README and `.en
 
 WorkSphere is currently an authentication and RBAC foundation, not a complete HRMS. The React application has login, a protected shell, a greeting dashboard, and a read-only role/permission matrix. The Express API implements health, CSRF, login, session lookup/logout, a greeting dashboard, and read-only access-control routes. Prisma currently models only users and RBAC. There are no employee, organization, attendance, leave, payroll, recruitment, performance, expense, asset, reporting, notification, or audit-log models or workflows.
 
-The current auth/RBAC slice is meaningful and has automated tests. Most API tests use an in-memory repository, however, and the opt-in database test performs only a random missing-user lookup. A complete successful login through PostgreSQL and the browser is not established by automated integration coverage. In the last observed local startup attempt, the API exited because `AUTH_TOKEN_SECRET` failed the minimum-length/placeholder check; the real `.env` was not inspected, and current runtime/database readiness is therefore unverified.
+The current auth/RBAC slice is meaningful and has automated tests. Most API tests use an in-memory repository. The opt-in database test performs only a random missing-user lookup; a successful login through PostgreSQL and the browser is not established by automated integration coverage. A later readiness check observed the API listening and `/health` returning OK, but `/health` does not check PostgreSQL. The real `.env` was not inspected, and database connectivity remains unverified.
 
 ## Status Definitions
 
@@ -17,17 +17,18 @@ The current auth/RBAC slice is meaningful and has automated tests. Most API test
 - **BACKEND ONLY**: API/data logic exists without a usable frontend surface.
 - **PENDING**: no meaningful implementation found.
 - **BLOCKED**: a dependency or requirement currently prevents completion.
+- **REQUIRES VERIFICATION**: implementation exists, but the necessary environment or integration result has not been safely verified.
 
 ## Evidence-Based Feature Audit
 
 | Module / feature | Status | Frontend evidence | Backend / API evidence | Database evidence | Tests | Missing work |
 |---|---|---|---|---|---|---|
-| Core: project/workspace foundation | PARTIALLY COMPLETED | `frontend/` React/Vite/TypeScript workspace; `frontend/src/main.tsx` mounts the app | `backend/` Express/TypeScript workspace; npm workspaces at root | Prisma/PostgreSQL configured | Root `check`, `build`; workspace tests | Production deployment, operational observability, and end-to-end runtime checks |
+| Core: project/workspace foundation | PARTIALLY COMPLETED | `frontend/` React/Vite/TypeScript workspace; `frontend/src/main.tsx` mounts the app | `backend/` Express/TypeScript workspace; npm workspaces at root | Prisma/PostgreSQL configured | Separate typechecks, non-DB tests and build passed (see verification record) | Production deployment, operational observability, and end-to-end runtime checks |
 | Core: routes and application layout | PARTIALLY COMPLETED | `frontend/src/App.tsx`, `ProtectedLayout.tsx`; routes `/login`, `/dashboard`, `/roles`, `/unauthorized` | API calls in `frontend/src/auth/api.ts` | None beyond auth data | No route/component integration tests | Expand navigation/layout as real modules are delivered; cover route loading/redirect behavior |
 | Core: reusable UI components | PARTIALLY COMPLETED | Shared protected layout and `FullPageStatus`; only one form and simple list-like matrix | N/A | N/A | No component tests | Reusable form fields, tables, dialogs, pagination, and accessible interaction patterns |
-| Core: PostgreSQL / Prisma | PARTIALLY COMPLETED | N/A | Prisma-backed auth/RBAC repository | `backend/prisma/schema.prisma`: `User`, `Role`, `Permission`, `UserRole`, `RolePermission`; one initial migration | Schema validation; opt-in DB test is read-only | All HR domain models/relations/indexes and isolated DB integration fixtures |
+| Core: PostgreSQL / Prisma | PARTIALLY COMPLETED | N/A | Prisma-backed auth/RBAC repository | `backend/prisma/schema.prisma`: `User`, `Role`, `Permission`, `UserRole`, `RolePermission`; one initial migration | Prisma validation; five isolated-URL guard unit tests; opt-in DB test is read-only and has not been run successfully | All HR domain models/relations/indexes; configure dedicated `worksphere_test` role/database and run guarded integration test |
 | Core: API architecture and errors | PARTIALLY COMPLETED | API error messages handled in `frontend/src/auth/api.ts` | `backend/src/app.ts`; route modules; Zod request validation; generic 500 handler | Auth/RBAC tables only | Supertest for current auth/API routes | Business services/routes, consistent request IDs/logging, readiness health, error contract tests |
-| Core: logging and configuration | PARTIALLY COMPLETED | Vite reads root env directory; `.env.example` has placeholders | `backend/src/index.ts` and scripts load root `.env`; token secret length enforced | `DATABASE_URL` in Prisma config | No configuration tests | Structured logger, centralized typed config validation, production diagnostics, secrets rotation procedure |
+| Core: logging and configuration | PARTIALLY COMPLETED | Vite reads root env directory; `.env.example` has placeholders | `backend/src/index.ts` and scripts load root `.env`; token secret length enforced | `DATABASE_URL` in Prisma config | Five isolated test-URL guard tests; no centralized runtime-config tests | Structured logger, centralized typed config validation, production diagnostics, secrets rotation procedure |
 | Auth: login and logout | PARTIALLY COMPLETED | `LoginPage.tsx`; auth calls in `AuthContext.tsx` / `api.ts` | `POST /api/auth/login`, `POST /api/auth/logout` | User lookup, password hash, session version | `backend/test/auth.test.ts`: valid login, generic invalid credentials, malformed/CSRF, limiter, logout invalidation | Successful PostgreSQL/browser E2E; UI behavior tests; operational session revocation checks |
 | Auth: password hashing | COMPLETED | Password form | Argon2 in auth, bootstrap, reset scripts | `User.passwordHash` | `backend/test/password-hasher.test.ts` verifies Argon2id and password verification | No major implementation gap in current scope; add stored-hash DB test with isolated fixtures |
 | Auth: token/session handling | PARTIALLY COMPLETED | Auth provider restores session with `/api/auth/me` | `SessionTokenService`: HS256, issuer/audience, 15-minute TTL; auth reloads user/status/sessionVersion; logout increments sessionVersion | `User.sessionVersion`, `User.status` | Auth API logout/replay test | Password reset does not increment sessionVersion, so existing sessions can remain valid until expiry; add expiry/version edge tests |
@@ -102,9 +103,13 @@ These completions do not mean the full HRMS, DB-backed browser login, or operati
 
 - User administration and all business HRMS modules: employee, organization, attendance, leave, holiday/shift, payroll, recruitment/onboarding, performance, expenses/assets, reports/exports, notification/integration, audit and recovery.
 
+### Requires Verification
+
+- `/health` returned OK during a later readiness check, but that is liveness only. PostgreSQL connectivity, applied migration state, and successful DB-backed login remain unverified.
+- The database URL guard is implemented and its five unit tests pass, but the dedicated `worksphere_test` role/database has not been configured and `backend/test/auth.database.test.ts` has not been run successfully.
+
 ### Blocked
 
-- Current local API readiness was blocked in the last observed startup attempt by `AUTH_TOKEN_SECRET` failing the 32-byte/non-placeholder check in `backend/src/auth/token.ts`. The `.env` itself was not read, so current configuration may have changed since that attempt.
 - Payroll statutory requirements, multi-organization/tenant boundaries, document storage/provider, email delivery provider, and deployment jurisdiction need product/operational decisions before those modules can be completed safely.
 
 ## Technical Debt and Security Risks
@@ -114,17 +119,16 @@ These completions do not mean the full HRMS, DB-backed browser login, or operati
 3. **Login rate limit is process-local.** `express-rate-limit` uses the default in-memory store; multi-instance deployment would need a shared store and proxy/IP configuration review.
 4. **Health is liveness only.** `/health` returns OK without checking PostgreSQL, so it does not prove DB readiness.
 5. **No structured logging or monitoring.** Errors are hidden behind generic responses, which is good for clients, but there is no evident server-side structured logger, correlation ID, or metrics.
-6. **Database-backed success path is untested.** The opt-in `backend/test/auth.database.test.ts` only checks a random nonexistent-email lookup and asserts the database name `worksphere`; it does not exercise successful login, persisted role loading, logout, or writes in an isolated test DB.
+6. **Database-backed success path is untested.** The opt-in `backend/test/auth.database.test.ts` only checks a random nonexistent-email lookup and asserts `worksphere_test`. `backend/test/database-test-config.ts` validates a local dedicated URL, and its five unit tests pass, but no successful PostgreSQL integration run is recorded. It does not exercise successful login, persisted role loading, logout, or write operations.
 7. **Case-insensitive email semantics are not enforced by the DB constraint.** `User.email` is uniquely constrained with ordinary PostgreSQL equality; auth lowercases before `findUnique`, while bootstrap/reset use insensitive lookups. Normalize all writes and consider a case-insensitive unique strategy before user CRUD is introduced.
-8. **README omits the password reset command.** `backend/package.json` has `reset:admin-password`, but README setup/common commands do not yet describe its invocation and session-revocation limitation.
+8. **Administrative command documentation is split across files.** The laptop setup guide documents the reset command; keep its password policy and session-revocation caveat aligned with `backend/package.json` and the reset implementation.
 9. **Environment/startup readiness.** `backend/src/index.ts` constructs the token service before listening; a placeholder/short secret terminates startup. Add config validation tests and distinguish liveness from readiness.
 10. **No frontend component tests or browser E2E suite.** Loading, routing, error, responsive and cookie/CORS browser behavior are not automatically verified.
 
 ## Verification Record
 
-- Last recorded full check before this audit: root `npm.cmd run check` passed with 28 backend tests passed and 1 opt-in database test skipped; 1 frontend test passed.
-- Last recorded root `npm.cmd run build` passed for frontend and backend.
-- Last recorded Prisma schema validation passed.
-- During this audit, editor diagnostics returned no errors for the inspected workspaces.
-- A fresh check could not be run because the persistent PowerShell terminal was blocked at an earlier content-parsing confirmation prompt. No audit-time database command was executed.
-- No `.env` contents were accessed; no migration or source feature code was changed for this audit.
+- 14 Oct 2026 safe checks: frontend and backend type checks passed; backend tests excluding `backend/test/auth.database.test.ts` passed (33 tests); frontend tests passed (1 test).
+- The five isolated database URL guard unit tests are included in those 33 backend tests. They do not connect to PostgreSQL.
+- The latest recorded root build passed for frontend and backend; Prisma schema validation passed. Those checks do not prove database connectivity.
+- The opt-in `backend/test/auth.database.test.ts` was excluded and has not been run against `worksphere_test`; no isolated test DB readiness or DB-backed login is claimed.
+- Editor diagnostics and documentation diff checks passed. No `.env` values were accessed, no migration/source code was modified during the audit update, and no database operation was executed.

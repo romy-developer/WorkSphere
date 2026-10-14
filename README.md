@@ -10,6 +10,8 @@ WorkSphere is a TypeScript monorepo for an HR management system. Module 1 provid
 
 ## Setup
 
+Project documentation: [Module Audit](docs/HRMS_MODULE_AUDIT.md), [Development Roadmap](docs/HRMS_DEVELOPMENT_ROADMAP.md), and the [WorkSphere Laptop Setup Guide](docs/WORKSPHERE_LAPTOP_SETUP_GUIDE.md).
+
 Run these commands from the repository root in PowerShell. The conditional copy preserves an existing local `.env`:
 
 ```powershell

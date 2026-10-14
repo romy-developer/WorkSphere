@@ -13,6 +13,20 @@ enum UserStatus {
   SUSPENDED
 }
 
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  TEMPORARY
+  INTERN
+}
+
+enum EmploymentStatus {
+  ACTIVE
+  ON_LEAVE
+  TERMINATED
+}
+
 model User {
   id             String     @id @default(uuid()) @db.Uuid
   email          String     @unique @db.VarChar(320)
@@ -23,6 +37,7 @@ model User {
   createdAt      DateTime   @default(now()) @db.Timestamptz(6)
   updatedAt      DateTime   @updatedAt @db.Timestamptz(6)
   userRoles      UserRole[]
+  employee       Employee?
 
   @@index([status])
 }
@@ -66,4 +81,55 @@ model RolePermission {
 
   @@id([roleId, permissionId])
   @@index([permissionId])
+}
+
+model Department {
+  id          String     @id @default(uuid()) @db.Uuid
+  name        String     @unique @db.VarChar(100)
+  code        String?    @unique @db.VarChar(32)
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime   @updatedAt @db.Timestamptz(6)
+  employees   Employee[]
+}
+
+model Designation {
+  id          String     @id @default(uuid()) @db.Uuid
+  title       String     @unique @db.VarChar(120)
+  code        String?    @unique @db.VarChar(32)
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime   @updatedAt @db.Timestamptz(6)
+  employees   Employee[]
+}
+
+model Employee {
+  id                String            @id @default(uuid()) @db.Uuid
+  employeeId        String            @unique @db.VarChar(32)
+  firstName         String            @db.VarChar(100)
+  lastName          String            @db.VarChar(100)
+  workEmail         String            @unique @db.VarChar(320)
+  mobile            String?           @db.VarChar(32)
+  departmentId      String            @db.Uuid
+  designationId     String            @db.Uuid
+  employmentType    EmploymentType
+  employmentStatus  EmploymentStatus  @default(ACTIVE)
+  joiningDate       DateTime          @db.Date
+  reportingManagerId String?          @db.Uuid
+  userId            String?           @unique @db.Uuid
+  deactivatedAt     DateTime?         @db.Timestamptz(6)
+  createdAt         DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime          @updatedAt @db.Timestamptz(6)
+  department        Department        @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  designation       Designation       @relation(fields: [designationId], references: [id], onDelete: Restrict)
+  reportingManager  Employee?         @relation("EmployeeReporting", fields: [reportingManagerId], references: [id], onDelete: Restrict)
+  directReports     Employee[]        @relation("EmployeeReporting")
+  user              User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([departmentId])
+  @@index([designationId])
+  @@index([reportingManagerId])
+  @@index([employmentStatus, deactivatedAt])
+  @@index([joiningDate])
+  @@index([lastName, firstName, id])
 }

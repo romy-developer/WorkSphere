@@ -1,6 +1,6 @@
 # WorkSphere HRMS Development Roadmap
 
-Roadmap based on the source audit in `docs/HRMS_MODULE_AUDIT.md` (2026-10-14). This is a proposal only; no feature implementation, migration, seed, bootstrap, password reset, or database write is authorized by this document.
+Current status: **14 October 2026**. This roadmap is based on the current source, tests, scripts, Prisma schema/migration, README and laptop setup guide. It is a plan only; no feature implementation or database operation is authorized by this document.
 
 ## Priorities
 
@@ -9,14 +9,69 @@ Roadmap based on the source audit in `docs/HRMS_MODULE_AUDIT.md` (2026-10-14). T
 - **P2**: important business capability, dependent on core employee/org data.
 - **P3**: optional/scale-stage capability after workflows and governance are stable.
 
+## Current Status
+
+**Status meanings:** COMPLETED is limited to the stated source/test scope; IN PROGRESS means the milestone is partly done; PENDING means functionality is not implemented or the integration run has not happened; REQUIRES VERIFICATION means the real environment/DB behavior is unproven.
+
+| Area | Status | Evidence and remaining verification |
+|---|---|---|
+| Authentication and authorization for current endpoints | COMPLETED for current scope; database-backed flow REQUIRES VERIFICATION | `backend/src/routes/auth.ts`, `backend/src/auth/service.ts`, `backend/src/auth/token.ts`, `backend/src/auth/csrf.ts`, `backend/src/middleware/`; `backend/test/auth.test.ts` covers login, CSRF, rate limit, session invalidation and permission checks using the in-memory repository. No successful PostgreSQL/browser login integration test has run. |
+| Argon2id password hashing | COMPLETED for hash/verify implementation | `backend/src/auth/service.ts`, bootstrap/reset services; `backend/test/password-hasher.test.ts` verifies Argon2id hash and verification. |
+| Super Admin bootstrap and password reset | COMPLETED implementation and unit tests; actual database result REQUIRES VERIFICATION | `bootstrap-admin.ts`, `reset-admin-password.ts`, their service/repository modules, and `backend/test/bootstrap.test.ts` / `admin-password-reset.test.ts`. No account initialization or password reset has been run in this verification. |
+| RBAC foundation | COMPLETED implementation and unit tests; database contents REQUIRES VERIFICATION | `backend/src/auth/permissions.ts`, `rbac-initialization.ts`, `prisma-rbac-initialization-repository.ts`; `backend/test/rbac-initialization.test.ts`. `RolesPage.tsx` and `GET /api/access-control` are read-only, not role administration. |
+| PostgreSQL/Prisma schema and migration | COMPLETED as repository configuration; database connectivity/application REQUIRES VERIFICATION | `backend/prisma/schema.prisma`, `backend/prisma/migrations/20261014000100_auth_rbac_init/migration.sql`, `prisma.config.ts`; Prisma validation passed 14 Oct 2026. No PostgreSQL connection or migration was performed for this status update. |
+| Isolated database test setup | Guard implementation COMPLETED; integration test PENDING / REQUIRES VERIFICATION | `backend/test/database-test-config.ts` and five passing safety tests; `auth.database.test.ts` constructs Prisma only after URL validation and asserts `worksphere_test`. Do not mark DB integration complete until the dedicated role/database are configured and the suite passes against them. |
+| P0 readiness milestone | IN PROGRESS | Frontend/backend type checks, non-DB tests and liveness have been verified; PostgreSQL connectivity and an isolated successful integration run remain outstanding. |
+| Build and non-database checks | COMPLETED for the recorded source snapshot | 14 Oct 2026: frontend/backend type checks passed; 33 backend non-DB tests passed; 1 frontend test passed; `npm run build` and Prisma validation passed in the recorded verification. The DB integration suite was excluded. |
+| Dashboard and roles UI | PENDING completion (basic/partial UI exists) | Dashboard displays signed-in identity and a welcome message; roles page shows the API role matrix read-only. No business metrics, CRUD, or administration workflows exist. |
+| Employee Management CRUD | PENDING — next milestone | No `Employee` model, routes, forms, list/detail UI, search or pagination exists. |
+| Organization, attendance, leave, shifts, payroll, recruitment, performance, expenses/assets, reports, notifications, audit logging and production readiness | PENDING | No corresponding complete data models and workflows were found. See phase checklists and feature details below. |
+
+## Phase Checklists
+
+### Phase 1 — Core Completion
+
+- [x] **COMPLETED:** Existing auth/session/CSRF and backend permission gates, within current endpoint scope and tested with in-memory API tests.
+- [x] **COMPLETED:** Argon2id, Super Admin bootstrap, RBAC initialization and password reset implementations with unit tests; no live account/role write is inferred.
+- [x] **COMPLETED:** Schema validation, frontend/backend type checks, build, and non-DB tests for the recorded source snapshot.
+- [x] **COMPLETED:** Dedicated DB URL validation and Prisma client wiring, with five isolated guard unit tests.
+- [>] **IN PROGRESS:** P0 readiness verification; API liveness is observed, but PostgreSQL connection and migration state remain unverified.
+- [ ] **PENDING / REQUIRES VERIFICATION:** Dedicated `worksphere_test` role/database setup and successful opt-in integration run.
+- [ ] **PENDING / NEXT:** Employee Management CRUD, including migration, API, frontend UI, validation, permissions, tests, search and pagination.
+- [ ] **PENDING:** Organization foundation, user administration, dashboard data and audit logging.
+
+### Phase 2 — Essential HRMS Workflows
+
+- [ ] **PENDING:** Organization, departments, designations, locations and reporting hierarchy.
+- [ ] **PENDING:** Attendance records, calculations, correction requests and approvals.
+- [ ] **PENDING:** Leave policies, balances, applications, approvals and history.
+- [ ] **PENDING:** Holiday calendars, shifts, schedules and overtime policy decisions.
+
+### Phase 3 — Business Modules
+
+- [ ] **PENDING:** Recruitment and onboarding.
+- [ ] **PENDING:** Performance management.
+- [ ] **PENDING:** Payroll and compensation; jurisdiction/legal rules are unresolved.
+- [ ] **PENDING:** Expenses, reimbursements and asset lifecycle.
+
+### Phase 4 — Reporting and Production Readiness
+
+- [ ] **PENDING:** Reports and exports.
+- [ ] **PENDING:** Notifications and external integrations.
+- [ ] **PENDING:** Security audit logging.
+- [ ] **PENDING:** Production operations, monitoring, backup/recovery and deployment hardening.
+
+`[x]` means completed within the scope stated and backed by evidence; `[>]` means active partial work; `[ ]` means pending; `[!]` means existing code or local infrastructure still requires verification.
+
 All schema evolution must use a new reviewed migration. Never edit an applied migration. Test writes must target an explicitly isolated disposable database, never the configured application/production database.
 
 ## Phase 1 — Core Completion
 
 ### 1. Verify API/authentication runtime and DB-backed flow
 
+- **Current status:** REQUIRES VERIFICATION for database-backed login/readiness; source implementation and non-DB tests are completed for existing endpoints.
 - **Priority / complexity:** P0 / Medium.
-- **Purpose:** Make the existing login/session slice verifiable end-to-end; the last observed backend startup attempt rejected `AUTH_TOKEN_SECRET` before listening.
+- **Purpose:** Verify the existing login/session slice against PostgreSQL. A prior readiness check observed `/health` returning OK, but that endpoint does not check PostgreSQL.
 - **Dependencies:** Local Postgres availability, correct private `.env` configuration, approved target for any test database; existing RBAC/user data for a manual smoke test.
 - **Frontend:** Add component/integration coverage for session restore, CSRF/login, invalid credentials, server unavailable, logout, and redirects; retain generic credential errors.
 - **Backend/API:** Validate runtime configuration before app construction; add a DB readiness check distinct from liveness; exercise current `GET /api/auth/csrf`, `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/logout`, `/api/dashboard`, and `/api/access-control` paths.
@@ -29,6 +84,7 @@ All schema evolution must use a new reviewed migration. Never edit an applied mi
 
 ### 2. Organization foundation
 
+- **Current status:** PENDING.
 - **Priority / complexity:** P0 / Large.
 - **Purpose:** Supply authoritative organization, site, department and job-designation references needed by employee profiles and reporting.
 - **Dependencies:** Decide single-company vs multi-tenant scope, legal/company settings ownership, location/timezone policy, and archive/rename semantics.
@@ -43,6 +99,7 @@ All schema evolution must use a new reviewed migration. Never edit an applied mi
 
 ### 3. Employee management vertical slice
 
+- **Current status:** PENDING; next development milestone.
 - **Priority / complexity:** P0 / Large.
 - **Purpose:** Establish the core employee record that attendance, leave, payroll and reports depend on.
 - **Dependencies:** Organization foundation; employee identifier and required-field policy; document storage decision; manager hierarchy rules.
@@ -57,6 +114,7 @@ All schema evolution must use a new reviewed migration. Never edit an applied mi
 
 ### 4. User administration and role assignment
 
+- **Current status:** PENDING.
 - **Priority / complexity:** P0 / Large.
 - **Purpose:** Replace manual-only account/role operations with controlled administration.
 - **Dependencies:** Existing authentication/RBAC matrix; account invitation/password setup policy; audit logging foundation should be implemented before enabling broad administrative changes.
@@ -71,6 +129,7 @@ All schema evolution must use a new reviewed migration. Never edit an applied mi
 
 ### 5. Super Admin dashboard data
 
+- **Current status:** PENDING completion; only basic UI/API wiring exists.
 - **Priority / complexity:** P1 / Large.
 - **Purpose:** Turn the current welcome shell into useful, accurate operational overview.
 - **Dependencies:** Employee, organization, attendance and leave models; agreed definitions/timezone and authorization scope.
@@ -85,6 +144,7 @@ All schema evolution must use a new reviewed migration. Never edit an applied mi
 
 ### 6. Audit logging and core security operations
 
+- **Current status:** PENDING.
 - **Priority / complexity:** P1 / Large.
 - **Purpose:** Establish accountability before user, employee, payroll and asset mutations proliferate.
 - **Dependencies:** Decide retention, actor identity, immutable fields, privacy/redaction, admin access and export policy.
@@ -101,6 +161,7 @@ All schema evolution must use a new reviewed migration. Never edit an applied mi
 
 ### 7. Attendance
 
+- **Current status:** PENDING.
 - **Priority / complexity:** P1 / Large.
 - **Purpose:** Record and summarize employee working time.
 - **Dependencies:** Employees, locations/timezones, holiday/shift rules, device/source and rounding policy.
@@ -115,6 +176,7 @@ All schema evolution must use a new reviewed migration. Never edit an applied mi
 
 ### 8. Leave management and approvals
 
+- **Current status:** PENDING.
 - **Priority / complexity:** P1 / Large.
 - **Purpose:** Manage leave policies, balances, applications and decisions.
 - **Dependencies:** Employee reporting hierarchy, holiday calendar, policy jurisdiction and accrual/carryover rules; shared approval model.
@@ -129,6 +191,7 @@ All schema evolution must use a new reviewed migration. Never edit an applied mi
 
 ### 9. Holidays, shifts and schedules
 
+- **Current status:** PENDING.
 - **Priority / complexity:** P1 / Large.
 - **Purpose:** Define working calendars and planned schedules used by attendance and leave.
 - **Dependencies:** Organization locations/timezones and attendance policy.
@@ -143,6 +206,7 @@ All schema evolution must use a new reviewed migration. Never edit an applied mi
 
 ### 10. Shared approval workflow
 
+- **Current status:** PENDING.
 - **Priority / complexity:** P1 / Medium-Large.
 - **Purpose:** Provide consistent reviewer/decision semantics for leave, attendance corrections and expenses.
 - **Dependencies:** Manager mapping, domain-specific state machines and delegation policy.
@@ -159,6 +223,7 @@ All schema evolution must use a new reviewed migration. Never edit an applied mi
 
 ### 11. Recruitment and onboarding
 
+- **Current status:** PENDING.
 - **Priority / complexity:** P2 / Large.
 - **Purpose:** Track openings, candidates through selection, and transition accepted hires into employees.
 - **Dependencies:** Employee/org core; candidate privacy and retention policy; document storage; interview calendar integration decision.
@@ -173,6 +238,7 @@ All schema evolution must use a new reviewed migration. Never edit an applied mi
 
 ### 12. Performance management
 
+- **Current status:** PENDING.
 - **Priority / complexity:** P2 / Large.
 - **Purpose:** Support goals, review cycles, self/manager assessment and feedback.
 - **Dependencies:** Employee hierarchy, review-cycle policy, rating/visibility/retention decisions.
@@ -187,6 +253,7 @@ All schema evolution must use a new reviewed migration. Never edit an applied mi
 
 ### 13. Payroll and compensation
 
+- **Current status:** PENDING.
 - **Priority / complexity:** P2 / Very Large.
 - **Purpose:** Calculate and record pay accurately with controlled access and reproducible history.
 - **Dependencies:** Deployment jurisdiction, currency, tax/statutory rules, payroll calendar, finance/accounting integration and legal review.
@@ -201,6 +268,7 @@ All schema evolution must use a new reviewed migration. Never edit an applied mi
 
 ### 14. Expenses and assets
 
+- **Current status:** PENDING.
 - **Priority / complexity:** P2 / Large.
 - **Purpose:** Track employee reimbursements and company asset custody.
 - **Dependencies:** Employee/org core, approval workflow, currency/reimbursement policy, receipt/object storage and inventory identifier policy.
@@ -217,6 +285,7 @@ All schema evolution must use a new reviewed migration. Never edit an applied mi
 
 ### 15. Reports and exports
 
+- **Current status:** PENDING.
 - **Priority / complexity:** P2 / Large.
 - **Purpose:** Produce consistent employee, attendance, leave and payroll reports and controlled exports.
 - **Dependencies:** Source modules, metric definitions, access scopes, export format/retention and payroll statutory approval.
@@ -231,6 +300,7 @@ All schema evolution must use a new reviewed migration. Never edit an applied mi
 
 ### 16. Notifications and integrations
 
+- **Current status:** PENDING.
 - **Priority / complexity:** P3 / Large.
 - **Purpose:** Deliver in-app/email alerts and connect approved external systems.
 - **Dependencies:** Provider choice, privacy/consent, templates, delivery SLAs, retry and integration ownership.
@@ -245,6 +315,7 @@ All schema evolution must use a new reviewed migration. Never edit an applied mi
 
 ### 17. Production hardening, backup and recovery
 
+- **Current status:** PENDING.
 - **Priority / complexity:** P1 / Large.
 - **Purpose:** Operate the service reliably and protect employee/payroll data.
 - **Dependencies:** Hosting/network topology, secrets provider, backup retention/RPO/RTO, support ownership and monitoring provider.
@@ -259,28 +330,27 @@ All schema evolution must use a new reviewed migration. Never edit an applied mi
 
 ## Dependencies and Decisions to Resolve First
 
-1. Confirm the local API is now able to start with a private valid `AUTH_TOKEN_SECRET`; do not share it. The last observed startup attempt failed this check.
+1. Keep a private, valid `AUTH_TOKEN_SECRET` on each laptop. A prior readiness check observed `/health` returning OK, but that endpoint does not prove PostgreSQL connectivity; do not disclose environment values.
 2. Decide single-organization versus multi-tenant access boundaries before organization or employee schemas are designed.
 3. Decide organization codes, employee ID generation, duplicate identity policy, manager hierarchy, and personal-data fields before employee CRUD.
-4. Approve an isolated disposable DB strategy before adding write integration tests; existing opt-in test is read-only and not a fixture database.
+4. Complete the dedicated `worksphere_test` role/database setup and successfully run the guarded opt-in suite before marking database integration verified; the current test is read-only, and future write tests must remain isolated there.
 5. Decide audit event retention/redaction and session invalidation after password reset before broad administration is exposed.
 6. Obtain jurisdiction-specific payroll and tax/legal requirements before payroll implementation.
 7. Choose document/object storage and notification/email providers before recruitment, expenses and notifications.
 8. Preserve existing uncommitted changes; review `git status` before every implementation task. Never edit applied migrations or run reset/bootstrap/password-reset/initializer commands during feature development without explicit authorization.
 
-## Recommended Single Next Development Task
+## Recommended Next Development Milestone: Employee Management CRUD
 
-**P0: Add an isolated DB-backed authentication integration suite and verify API readiness/startup configuration.** This is the narrowest next step because the current functional core depends on auth, yet existing DB coverage does not prove successful login/session behavior against PostgreSQL, and a prior observed backend startup was blocked by token-secret configuration. Do not use production/local employee data and do not make the test depend on a pre-created admin account.
+**Priority / complexity:** P0 / Large. Employee Management is the next feature milestone and is not yet implemented. The isolated DB integration test remains pending until `worksphere_test` and its dedicated role are configured and the suite succeeds; do not use development or production data for tests.
 
-**Likely files:** `backend/test/auth.database.test.ts` (replace/extend only after confirming its current read-only contract), new disposable-database test helper/config, `backend/src/index.ts`, `backend/src/app.ts`, and `.env.example`/`README.md` for test-only configuration. No `.env` edits or migration changes by default.
+**Scope:**
 
-**Acceptance criteria:**
+- **Database migration:** Define and review a new employee schema/migration; do not edit the existing auth/RBAC migration. Decide required profile/employment fields, employee identifier uniqueness, organization scope and whether an employee links to a `User`.
+- **API:** Add authenticated, permission-checked create, list, detail and update/status endpoints using Prisma persistence and explicit request/service validation.
+- **Frontend:** Add employee navigation, searchable/paginated list, create/edit form, detail view, and loading/empty/error/success states.
+- **Validation:** Enforce agreed required fields, unique employee identifiers, valid dates/status transitions, and valid organization references; define and test duplicate prevention.
+- **Permissions:** Use `employees.read` for reads and `employees.manage` for mutations. Enforce permissions at each backend route; hidden UI links are not authorization.
+- **Tests:** Unit/service, Supertest validation and permission tests. Cover CRUD persistence, duplicate IDs, bad references, search, pagination, and UI states. Any DB-writing integration test must use only the guarded `worksphere_test` database after it is configured.
+- **Acceptance criteria:** Authorized admins can create, search, paginate, view and update employee records; changes persist in the reviewed target database; unauthorized requests are rejected; validations and search/pagination have automated coverage; new schema changes use a reviewed migration and never alter an applied migration.
 
-- The API fails fast with safe, field-specific configuration errors and never prints secret values.
-- Liveness and PostgreSQL readiness are distinct and accurately report their states.
-- An isolated test database is explicitly identified and guarded; test fixtures are created and cleaned only there.
-- Tests cover successful persisted login, generic invalid credentials, status rejection, CSRF, session restoration, logout/sessionVersion invalidation, and current permission checks.
-- No real user is created, no production data is touched, no migration is applied automatically, and the test suite remains opt-in until a disposable DB is configured.
-- `npm run check`, `npm run build`, and Prisma validation pass.
-
-After this foundation is reviewed and approved, begin Organization foundation followed by Employee CRUD as the first HR business vertical slice.
+**Likely files:** new `backend/src/employees/` service/repository/routes; `backend/src/app.ts`; `backend/prisma/schema.prisma` plus a new migration; frontend employee API/pages/forms and route/navigation; employee tests and permission tests. Any RBAC, documentation or database-test fixture changes should be scoped to an evidenced requirement. Preserve existing unrelated work.
